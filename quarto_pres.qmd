@@ -1,0 +1,138 @@
+---
+title: "HMM with OHCA - TICINO"
+project:
+  type: website
+  output-dir: docs
+---
+
+# RESULTS
+
+```{r, include = F}
+library(plotly)
+library(ggpubr)
+library(tidyverse)
+library(rgdal)
+load("C:/Users/feder/Desktop/SPATIO-TEMPORAL HIDDEN MARKOV MODEL OHCA/hmm12.RData")
+load("C:/Users/feder/Desktop/SPATIO-TEMPORAL HIDDEN MARKOV MODEL OHCA/hmm0102.RData")
+load("C:/Users/feder/Desktop/SPATIO-TEMPORAL HIDDEN MARKOV MODEL OHCA/hmm033.RData")
+```
+
+```{r}
+Tab = data.frame(spatial=c(0,0,0,1,1,1),k=c(1:3,1:3),
+                 eldpw=c(eldpw01,eldpw02,eldpw03,eldpw1,eldpw2,eldpw3),
+                 seldpw=c(seldpw01,seldpw02,seldpw03,seldpw1,seldpw2,seldpw3))
+knitr::kable(Tab)
+```
+
+```{r, include =  F}
+Mode <- function(x){
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+mBe = apply(est3$BE,c(1,2),mean); #print(mBe)   # average estimate of beta
+seBe = apply(est3$BE,c(1,2),sd); #print(seBe)   # sd for beta
+mGa = apply(est3$GA,c(1,2),mean); #print(mGa)   # average estimate of gamma
+seGa = apply(est3$GA,c(1,2),sd); #print(seGa)   # sd for gamma
+mDe = apply(est3$DE,c(1,2,3),mean); #print(mDe)   # average estimate of delta
+seDe = apply(est3$DE,c(1,2,3),sd); #print(seDe)   # sd for delta
+MU = apply(est3$UU,c(1,2),Mode); #print(head(MU))  # MAP assigment of U
+MUh = apply(est3$UUn,c(1,2),Mode); #print(head(MUh))  # MAP prediction for U
+mYh = apply(est3$YYn,c(1,2),mean); #print(head(mYh))  # prediction for responses
+seYh = apply(est3$YYn,c(1,2),sd) #print(head(seYh))  # sd for predictions
+```
+
+
+***Acceptance Ratio***
+
+```{r, echo = F}
+acc = data.frame(cbind(est3$accbe, est3$accde, est3$accga))
+colnames(acc) = c('Beta', 'Delta', 'Gamma')
+acc
+```
+
+```{r, echo = F, warning=F}
+g1 = ggplot(data.frame(Year = unique(data$Year)[-1], Differenziali = mBe[1,-1], lowerbhm =  mBe[1, -1] - seBe[1, -1] * 1.96, upperbhm = mBe[1, -1] + seBe[1, -1] * 1.96)) +
+  geom_line(lwd = 1.5, col = 'navyblue', mapping = aes(Year, Differenziali)) +
+  geom_line( col = 'indianred', mapping = aes(Year, lowerbhm)) +
+  geom_line(col = 'indianred', mapping = aes(Year, upperbhm)) +
+  geom_ribbon(aes(x = Year,
+                  ymin = lowerbhm,
+                  ymax = upperbhm),
+              fill = "indianred", alpha = .4) 
+ggplotly(g1)
+```
+
+# Predictions
+
+**MAE on Predictions:**
+
+```{r, echo = F}
+Metrics::mae(predicted = round(as.vector(c(mYh[, 1], mYh[, 2]))), actual = tail(data$ohca, 117*2))
+```
+
+$R^2$ Based on Predictions
+
+```{r, warning = F, echo = F}
+y.hat = round(as.vector(c(mYh[, 1], mYh[, 2])))
+mun = tail(data$Municipality, 117*2)
+Year = c(rep(2020, 117), rep(2021, 117))
+predictions = data.frame(Predictions = y.hat, Municipality = mun, Year = Year, Observed = tail(data$ohca, 117*2))
+mod.lm = lm(Observed ~ Predictions, predictions); summ = summary(mod.lm); R2 = summ$r.squared
+g2 = ggplot(predictions, mapping = aes(Predictions, Observed)) +
+  geom_count(color = 'navyblue') +
+  geom_smooth(method = 'lm', col = 'indianred', se = F) +
+  # stat_regline_equation() +
+  #  stat_cor(label.y = 20) +
+  geom_text(x=10, y=20, label=paste('R2: ', round(R2, 3)), cex = 3, col = 'indianred') 
+ggplotly(g2)
+```
+
+***Predictions vs. Observed Conditioned on Big City***
+
+```{r, echo = F}
+#lo devo fare su due istanti temporali
+big.city = c('BELLINZONA', 'LUGANO', 'LOCARNO', 'MENDRISIO', 'CHIASSO' )
+df_bar = reshape2::melt(predictions %>% 
+                          filter(Municipality %in% big.city) %>%
+                          mutate(Year = as.factor(Year)), id.vars = c('Year', 'Municipality'))
+
+g4 = ggplot(df_bar, aes(x = Municipality, y= value, fill = variable)) +
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  facet_wrap(~Year)+
+  scale_fill_hue(l=40, c=35) +
+  xlab('')+
+  ylab('')+
+  # ggtitle('Predicted vs. Real Values') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplotly(g4)
+```
+
+$|Prediction - Observed|$ ***Counts***
+
+```{r, echo = F}
+diff.plot = predictions %>%
+  mutate(difff = as.factor(abs(Predictions-Observed))) %>%
+  group_by(difff) %>%
+  summarise(Discrepancies = n()) %>%
+  rename(Differences = difff)
+g4 = ggplot(diff.plot, aes(x = Differences, y= Discrepancies)) +
+  geom_bar(stat="identity", width=.5, position = "dodge", fill = 'deepskyblue4') +
+  ylab('Counts') +
+  xlab('Discrepancies Between Predictions and Real Values') +
+  geom_text( aes(label=Discrepancies), vjust=-1)
+ggplotly(g4)
+```
+
+## 2020
+
+```{r, echo = F}
+load('C:/Users/feder/Desktop/PROGETTO OHCA/data/ohca/hmm.RData')
+l1
+```
+
+## 2021
+
+```{r, echo = F}
+load('C:/Users/feder/Desktop/PROGETTO OHCA/data/ohca/hmm.RData')
+l2
+```
